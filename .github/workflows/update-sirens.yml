@@ -1,0 +1,32 @@
+name: Update siren maps
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * 1'
+  push:
+    paths:
+      - 'scripts/crawl-maps.mjs'
+      - 'package.json'
+      - '.github/workflows/update-sirens.yml'
+permissions:
+  contents: write
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npm run crawl
+      - name: Commit refreshed dataset
+        run: |
+          git config user.name "identi-siren-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/sirens.json data/sirens.js data/map-manifest.json
+          git diff --cached --quiet || git commit -m "Refresh master siren maps"
+          git push
