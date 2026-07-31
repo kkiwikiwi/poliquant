@@ -1,6 +1,8 @@
 name: Update siren maps
 on:
   workflow_dispatch:
+  issues:
+    types: [opened]
   schedule:
     - cron: '17 8 * * 1'
   push:
@@ -10,8 +12,10 @@ on:
       - '.github/workflows/update-sirens.yml'
 permissions:
   contents: write
+  issues: read
 jobs:
   crawl:
+    if: github.event_name != 'issues' || contains(github.event.issue.title, '[run-siren-crawl]')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
