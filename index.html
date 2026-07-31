@@ -1,1 +1,488 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Identi-Siren</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>:root{--bg:#091015;--panel:#0e171d;--line:#26363f;--ink:#eef5f8;--muted:#9eb0b9;--gold:#f5b642;--green:#53c68c;--red:#ea5b58}*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,-apple-system,Segoe UI,sans-serif}header{height:68px;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:#0b1319}.logo{font-weight:900;font-size:20px;white-space:nowrap}.logo b{color:var(--gold)}input,button{font:inherit;border:1px solid #334852;border-radius:9px;background:#132129;color:white;padding:10px 12px}input{flex:1;min-width:120px}button{cursor:pointer}main{height:calc(100% - 68px);display:grid;grid-template-columns:minmax(0,1fr) 420px}#map{height:100%}aside{overflow:auto;border-left:1px solid var(--line);background:linear-gradient(#101a21,#091015)}.empty,.detail{padding:24px}.empty{height:100%;display:flex;flex-direction:column;justify-content:center}.muted{color:var(--muted);line-height:1.5}.eyebrow{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--gold);font-weight:800}.detail h2{font-size:28px;line-height:1.05;margin:8px 0}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:16px 0}.chip{padding:6px 9px;border-radius:999px;background:#16252d;border:1px solid #2c3e47;font-size:12px}.card{margin:14px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#111d24}.card h3{font-size:13px;margin:0;padding:11px 13px;border-bottom:1px solid var(--line)}.body{padding:13px;line-height:1.5}.frame{display:block;width:100%;height:235px;border:0;background:#081015}.actions{display:flex;gap:8px}.actions a{flex:1;text-align:center;text-decoration:none;color:white;border:1px solid #36515e;border-radius:9px;padding:10px;background:#172832}.status{position:fixed;z-index:1000;left:12px;bottom:14px;padding:8px 10px;border:1px solid #30414a;border-radius:9px;background:#0b141bd9;font-size:12px}.pin{border-radius:50%;border:2px solid white;box-shadow:0 1px 6px #000}.warn{color:#ffd47a}.ok{color:#7ee2aa}@media(max-width:850px){header{height:auto;flex-wrap:wrap}.logo{width:100%}main{height:calc(100% - 116px);display:block}#map{height:58%}aside{height:42%;border-left:0;border-top:1px solid var(--line)}.status{display:none}}</style></head><body><header><div class="logo">Identi-<b>Siren</b></div><input id="search" placeholder="Search siren, model, state, or source map"><button id="locate">Locate me</button><button id="key">Video key</button></header><main><div id="map"></div><aside id="panel"><div class="empty"><h1>Select a siren</h1><p class="muted">Pins are imported directly from every public Google My Map linked in the master siren-map thread. Click a pin for the original description, exact coordinates, Street View, and strict video matching.</p><p id="load" class="muted">Loading dataset…</p></div></aside></main><div id="status" class="status">Loading…</div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="data/sirens.js"></script><script>'use strict';const S=Array.isArray(window.IDENTI_SIRENS)?window.IDENTI_SIRENS:[],M=Array.isArray(window.IDENTI_MAP_MANIFEST)?window.IDENTI_MAP_MANIFEST:[],panel=document.querySelector('#panel'),search=document.querySelector('#search'),statusEl=document.querySelector('#status'),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const map=L.map('map',{preferCanvas:true,zoomControl:false}).setView([39.5,-98.35],4);L.control.zoom({position:'bottomright'}).addTo(map);L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery © Esri'}).addTo(map);L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19}).addTo(map);let layers=[];function color(s){return s==='active'?'#53c68c':s==='inactive'?'#ea5b58':'#f5b642'}function q(s){return [s.name,s.model,s.manufacturer,'siren',s.city,s.state].filter(Boolean).join(' ')}function street(s){return `https://www.google.com/maps?layer=c&cbll=${encodeURIComponent(s.lat)},${encodeURIComponent(s.lng)}&cbp=11,0,0,0,0&output=svembed`}function yt(s){return 'https://www.youtube.com/results?search_query='+encodeURIComponent(q(s))}async function video(s){const key=localStorage.getItem('is-youtube-key');if(!key)throw Error('Automatic embedding is disabled until a YouTube Data API key is supplied.');const u=new URL('https://www.googleapis.com/youtube/v3/search');u.search=new URLSearchParams({part:'snippet',type:'video',maxResults:'10',q:q(s),key});const r=await fetch(u);if(!r.ok)throw Error('YouTube search failed.');const j=await r.json(),models=String(s.model||s.name).toLowerCase().split(/[^a-z0-9]+/).filter(x=>x.length>1),places=[s.city,s.state,s.sourceMap].filter(Boolean).flatMap(x=>String(x).toLowerCase().split(/[^a-z0-9]+/)).filter(x=>x.length>2);const items=(j.items||[]).map(x=>{const h=(x.snippet.title+' '+x.snippet.channelTitle).toLowerCase(),mh=models.filter(t=>h.includes(t)).length,ph=places.filter(t=>h.includes(t)).length;return{x,mh,ph,score:mh*6+ph*5}}).filter(v=>v.mh>0&&v.ph>0).sort((a,b)=>b.score-a.score);if(!items.length)throw Error('No video matched both the mapped model and locality.');return items[0].x}async function show(s){map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),16));panel.innerHTML=`<article class="detail"><div class="eyebrow">${esc(s.status||'unknown')} · ${esc(s.category||'warning siren')}</div><h2>${esc(s.name)}</h2><div class="muted">${esc([s.city,s.state].filter(Boolean).join(', ')||s.sourceMap||'Location from source map')}</div><div class="chips"><span class="chip">${esc(s.manufacturer||'Maker not listed')}</span><span class="chip">${esc(s.model||'Model not listed')}</span><span class="chip">${Number(s.lat).toFixed(6)}, ${Number(s.lng).toFixed(6)}</span></div><section class="card"><h3>Original map information</h3><div class="body">${esc(s.description||'No description was supplied by the map owner.')}${s.sourceUrl?`<br><br><a target="_blank" rel="noopener" href="${esc(s.sourceUrl)}">Open source map</a>`:''}</div></section><section class="card"><h3>Testing schedule</h3><div class="body">${esc(s.testSchedule||'No verified testing schedule was present in the source pin.')}</div></section><section class="card"><h3>Video</h3><div id="video" class="body">Checking for an exact model-and-location match…</div></section><section class="card"><h3>Street View at the pin coordinates</h3><iframe class="frame" loading="lazy" src="${street(s)}"></iframe></section><div class="actions"><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Open coordinates</a><a target="_blank" rel="noopener" href="${yt(s)}">Search YouTube</a></div></article>`;const box=document.querySelector('#video');try{const v=await video(s),id=v.id.videoId;box.outerHTML=`<iframe class="frame" loading="lazy" src="https://www.youtube-nocookie.com/embed/${esc(id)}" title="${esc(v.snippet.title)}" allowfullscreen></iframe><div class="body ok">Exact-match candidate: ${esc(v.snippet.title)}</div>`}catch(e){box.innerHTML=`<span class="warn">No video was embedded because Identi-Siren will not guess.</span><br>${esc(e.message)}<br><br><a target="_blank" rel="noopener" href="${yt(s)}">Review the precise YouTube search</a>`}}function render(list){layers.forEach(x=>x.remove());layers=list.map(s=>L.circleMarker([s.lat,s.lng],{renderer:L.canvas(),radius:5,weight:1.5,color:'#fff',fillColor:color(s.status),fillOpacity:.95}).addTo(map).bindTooltip(s.name).on('click',()=>show(s)))}render(S);search.addEventListener('input',()=>{const x=search.value.toLowerCase().trim();render(!x?S:S.filter(s=>JSON.stringify(s).toLowerCase().includes(x)))});document.querySelector('#locate').onclick=()=>map.locate({setView:true,maxZoom:12});document.querySelector('#key').onclick=()=>{const old=localStorage.getItem('is-youtube-key')||'',v=prompt('Optional YouTube Data API key. It is stored only in this browser. Leave blank to remove it.',old);if(v===null)return;v.trim()?localStorage.setItem('is-youtube-key',v.trim()):localStorage.removeItem('is-youtube-key')};const good=M.filter(x=>x.status==='ok').length,failed=M.filter(x=>x.status==='failed').length;document.querySelector('#load').textContent=S.length?`${S.length.toLocaleString()} sirens loaded from ${good.toLocaleString()} maps.`:'The automated import has not produced data yet.';statusEl.textContent=`${S.length.toLocaleString()} pins · ${good} maps loaded${failed?` · ${failed} failed`:''}`;</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#091015">
+<title>Identi-Siren</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#091015;--panel:#0e171d;--line:#26363f;--ink:#eef5f8;--muted:#9eb0b9;--gold:#f5b642;--green:#53c68c;--red:#ea5b58}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,-apple-system,Segoe UI,sans-serif}
+header{min-height:68px;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:#0b1319}
+.logo{font-weight:900;font-size:20px;white-space:nowrap}.logo b{color:var(--gold)}
+input,button{font:inherit;border:1px solid #334852;border-radius:9px;background:#132129;color:white;padding:10px 12px}
+input{flex:1;min-width:140px}button{cursor:pointer}button:hover{background:#1a2d37}
+main{height:calc(100% - 68px);display:grid;grid-template-columns:minmax(0,1fr) 420px}
+#map{height:100%}aside{overflow:auto;border-left:1px solid var(--line);background:linear-gradient(#101a21,#091015)}
+.empty,.detail{padding:24px}.empty{height:100%;display:flex;flex-direction:column;justify-content:center}
+.muted{color:var(--muted);line-height:1.5}.eyebrow{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--gold);font-weight:800}
+.detail h2{font-size:28px;line-height:1.05;margin:8px 0}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:16px 0}
+.chip{padding:6px 9px;border-radius:999px;background:#16252d;border:1px solid #2c3e47;font-size:12px}
+.card{margin:14px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#111d24}
+.card h3{font-size:13px;margin:0;padding:11px 13px;border-bottom:1px solid var(--line)}.body{padding:13px;line-height:1.5}
+.frame{display:block;width:100%;height:235px;border:0;background:#081015}.actions{display:flex;gap:8px}
+.actions a{flex:1;text-align:center;text-decoration:none;color:white;border:1px solid #36515e;border-radius:9px;padding:10px;background:#172832}
+.status{position:fixed;z-index:1000;left:12px;bottom:14px;max-width:min(760px,calc(100vw - 100px));padding:8px 10px;border:1px solid #30414a;border-radius:9px;background:#0b141be8;font-size:12px}
+.warn{color:#ffd47a}.ok{color:#7ee2aa}.error{color:#ff9693}.progress{height:5px;background:#16232a;border-radius:999px;overflow:hidden;margin-top:10px}.progress i{display:block;height:100%;width:0;background:var(--gold);transition:width .25s}
+@media(max-width:900px){header{height:auto;flex-wrap:wrap}.logo{width:100%}header input{flex-basis:100%}main{height:calc(100% - 164px);display:block}#map{height:58%}aside{height:42%;border-left:0;border-top:1px solid var(--line)}.status{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Identi-<b>Siren</b></div>
+  <input id="search" placeholder="Search siren, model, state, or source map">
+  <button id="locate">Locate me</button>
+  <button id="refresh">Refresh maps</button>
+  <button id="key">Video key</button>
+</header>
+<main>
+  <div id="map"></div>
+  <aside id="panel">
+    <div class="empty">
+      <h1>Select a siren</h1>
+      <p class="muted">Pins are read from the public Google My Maps linked by the master State/Country siren-map thread. Click a pin for source information, exact coordinates, Street View, and conservative video matching.</p>
+      <p id="load" class="muted">Starting map importer…</p>
+      <div class="progress"><i id="bar"></i></div>
+    </div>
+  </aside>
+</main>
+<div id="status" class="status">Starting…</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="data/sirens.js"></script>
+<script>
+'use strict';
+
+const FORUM='https://www.airraidsirens.net/forums/viewtopic.php?t=27945';
+const panel=document.querySelector('#panel');
+const search=document.querySelector('#search');
+const statusEl=document.querySelector('#status');
+const loadEl=document.querySelector('#load');
+const bar=document.querySelector('#bar');
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const stripHtml=value=>{const d=document.createElement('div');d.innerHTML=String(value??'');return (d.textContent||'').replace(/\s+/g,' ').trim()};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+let sirens=Array.isArray(window.IDENTI_SIRENS)?window.IDENTI_SIRENS:[];
+let manifest=Array.isArray(window.IDENTI_MAP_MANIFEST)?window.IDENTI_MAP_MANIFEST:[];
+let activeImport=false;
+let markerLayers=[];
+const markerKeys=new Set();
+const canvas=L.canvas({padding:.35});
+
+const map=L.map('map',{preferCanvas:true,zoomControl:false,worldCopyJump:true}).setView([39.5,-98.35],4);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  maxZoom:19,attribution:'Imagery © Esri'
+}).addTo(map);
+L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{
+  maxZoom:19,attribution:''
+}).addTo(map);
+
+function color(status){return status==='active'?'#53c68c':status==='inactive'?'#ea5b58':'#f5b642'}
+function videoQuery(s){return [s.model||s.name,'siren',s.city,s.state,s.sourceMap].filter(Boolean).join(' ')}
+function youtubeSearch(s){return 'https://www.youtube.com/results?search_query='+encodeURIComponent(videoQuery(s))}
+function street(s){return `https://www.google.com/maps?layer=c&cbll=${encodeURIComponent(s.lat)},${encodeURIComponent(s.lng)}&cbp=11,0,0,0,0&output=svembed`}
+function pinKey(s){return `${Number(s.lat).toFixed(6)},${Number(s.lng).toFixed(6)},${String(s.name).toLowerCase()}`}
+function setStatus(text,kind=''){statusEl.className='status '+kind;statusEl.textContent=text}
+function updateImportStatus(done,total,mapsDone,mapsTotal,extra=''){
+  const pct=total?Math.min(100,Math.round(done/total*100)):0;
+  bar.style.width=pct+'%';
+  const text=`${sirens.length.toLocaleString()} pins · ${mapsDone}/${mapsTotal||'?'} maps processed${extra?' · '+extra:''}`;
+  setStatus(text);
+  if(loadEl) loadEl.textContent=text;
+}
+
+function addPins(rows){
+  const additions=[];
+  for(const s of rows){
+    const lat=Number(s.lat),lng=Number(s.lng);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))continue;
+    s.lat=lat;s.lng=lng;
+    const key=pinKey(s);
+    if(markerKeys.has(key))continue;
+    markerKeys.add(key);
+    sirens.push(s);
+    additions.push(s);
+  }
+  for(const s of additions){
+    const layer=L.circleMarker([s.lat,s.lng],{
+      renderer:canvas,radius:5,weight:1.4,color:'#fff',fillColor:color(s.status),fillOpacity:.96
+    }).bindTooltip(s.name||'Unidentified siren').on('click',()=>show(s)).addTo(map);
+    markerLayers.push({layer,s});
+  }
+  return additions.length;
+}
+
+function renderFiltered(list){
+  for(const item of markerLayers)item.layer.remove();
+  markerLayers=[];
+  markerKeys.clear();
+  const current=sirens;
+  sirens=[];
+  addPins(list);
+  sirens=current;
+}
+
+async function show(s){
+  map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),16));
+  panel.innerHTML=`<article class="detail">
+    <div class="eyebrow">${esc(s.status||'unknown')} · ${esc(s.category||'warning siren')}</div>
+    <h2>${esc(s.name||'Unidentified siren')}</h2>
+    <div class="muted">${esc([s.city,s.state].filter(Boolean).join(', ')||s.sourceMap||'Location from source map')}</div>
+    <div class="chips">
+      <span class="chip">${esc(s.manufacturer||'Maker not listed')}</span>
+      <span class="chip">${esc(s.model||'Model not listed')}</span>
+      <span class="chip">${Number(s.lat).toFixed(6)}, ${Number(s.lng).toFixed(6)}</span>
+    </div>
+    <section class="card"><h3>Original map information</h3><div class="body">
+      ${esc(s.description||'No description was supplied by the map owner.')}
+      ${s.sourceUrl?`<br><br><a target="_blank" rel="noopener" href="${esc(s.sourceUrl)}">Open source map</a>`:''}
+    </div></section>
+    <section class="card"><h3>Testing schedule</h3><div class="body">${esc(s.testSchedule||'No verified testing schedule was present in the source pin.')}</div></section>
+    <section class="card"><h3>Video</h3><div id="video" class="body">Checking for an exact model-and-location match…</div></section>
+    <section class="card"><h3>Street View at the exact pin coordinates</h3><iframe class="frame" loading="lazy" src="${street(s)}"></iframe></section>
+    <div class="actions">
+      <a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Open coordinates</a>
+      <a target="_blank" rel="noopener" href="${youtubeSearch(s)}">Search YouTube</a>
+    </div>
+  </article>`;
+  const box=document.querySelector('#video');
+  try{
+    const v=await findExactVideo(s);
+    const id=v.id.videoId;
+    box.outerHTML=`<iframe class="frame" loading="lazy" src="https://www.youtube-nocookie.com/embed/${esc(id)}" title="${esc(v.snippet.title)}" allowfullscreen></iframe><div class="body ok">Exact-match candidate: ${esc(v.snippet.title)}</div>`;
+  }catch(error){
+    box.innerHTML=`<span class="warn">No video was embedded because Identi-Siren will not guess.</span><br>${esc(error.message)}<br><br><a target="_blank" rel="noopener" href="${youtubeSearch(s)}">Review the precise YouTube search</a>`;
+  }
+}
+
+async function findExactVideo(s){
+  const key=localStorage.getItem('is-youtube-key');
+  if(!key)throw Error('Automatic embedding requires a YouTube Data API key.');
+  const u=new URL('https://www.googleapis.com/youtube/v3/search');
+  u.search=new URLSearchParams({part:'snippet',type:'video',maxResults:'12',q:videoQuery(s),key});
+  const response=await fetch(u);
+  if(!response.ok)throw Error('YouTube search failed.');
+  const json=await response.json();
+  const modelTokens=String(s.model||s.name).toLowerCase().split(/[^a-z0-9]+/).filter(x=>x.length>1);
+  const placeTokens=[s.city,s.state,s.sourceMap].filter(Boolean).flatMap(x=>String(x).toLowerCase().split(/[^a-z0-9]+/)).filter(x=>x.length>2);
+  const matches=(json.items||[]).map(item=>{
+    const hay=(item.snippet.title+' '+item.snippet.channelTitle+' '+item.snippet.description).toLowerCase();
+    const modelHits=modelTokens.filter(t=>hay.includes(t)).length;
+    const placeHits=placeTokens.filter(t=>hay.includes(t)).length;
+    return{item,modelHits,placeHits,score:modelHits*8+placeHits*6};
+  }).filter(v=>v.modelHits>0&&v.placeHits>0).sort((a,b)=>b.score-a.score);
+  if(!matches.length)throw Error('No result matched both the mapped model and locality.');
+  return matches[0].item;
+}
+
+function normalizeUrl(raw){
+  return String(raw||'').replace(/&amp;/g,'&').replace(/[)\]}>.,;]+$/g,'').trim();
+}
+function mapId(raw){
+  try{
+    const u=new URL(normalizeUrl(raw));
+    const q=u.searchParams.get('mid')||u.searchParams.get('id');
+    if(q)return q;
+    return u.pathname.match(/\/maps\/d\/(?:u\/\d+\/)?(?:viewer|edit)\/([^/?#]+)/i)?.[1]
+      ||u.pathname.match(/\/file\/d\/([^/?#]+)/i)?.[1]
+      ||null;
+  }catch{return null}
+}
+function isMapUrl(url){return /(?:google\.[a-z.]+\/maps\/d\/|drive\.google\.com\/|earth\.google\.com\/earth\/d\/)/i.test(url)}
+function isShortUrl(url){return /(?:bit\.ly|tinyurl\.com|goo\.gl|t\.co|is\.gd|shorturl\.at)\//i.test(url)}
+function allUrls(text){return (String(text).match(/https?:\/\/[^\s<>"'`]+/gi)||[]).map(normalizeUrl)}
+
+async function fetchFirst(urls,validator,timeout=45000){
+  let last='';
+  for(const url of urls){
+    try{
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),timeout);
+      const response=await fetch(url,{signal:controller.signal,headers:{Accept:'text/plain,text/markdown,application/xml,text/xml,*/*'}});
+      clearTimeout(timer);
+      if(!response.ok)throw Error(`HTTP ${response.status}`);
+      const text=await response.text();
+      if(validator&&!validator(text))throw Error('unexpected response');
+      return{text,url};
+    }catch(error){last=error.message}
+  }
+  throw Error(last||'all sources failed');
+}
+function forumSources(url){
+  const noScheme=url.replace(/^https?:\/\//,'');
+  return[
+    `https://r.jina.ai/http://${noScheme}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(url)}`
+  ];
+}
+function kmlSources(url){
+  const noScheme=url.replace(/^https?:\/\//,'');
+  return[
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    `https://r.jina.ai/http://${noScheme}`
+  ];
+}
+
+async function resolveShort(url){
+  try{
+    const result=await fetchFirst(forumSources(url),text=>text.length>20,25000);
+    const candidate=allUrls(result.text).find(isMapUrl);
+    return candidate||'';
+  }catch{return''}
+}
+
+function extractMapLinks(text){
+  const found=new Map();
+  const markdown=/\[([^\]]{1,140})\]\((https?:\/\/[^)\s]+)\)/g;
+  for(const match of text.matchAll(markdown)){
+    const url=normalizeUrl(match[2]);
+    const id=mapId(url);
+    if(id&&isMapUrl(url))found.set(id,{mid:id,url,name:stripHtml(match[1])||`Siren map ${id.slice(0,8)}`});
+  }
+  for(const url of allUrls(text)){
+    const id=mapId(url);
+    if(id&&isMapUrl(url)&&!found.has(id))found.set(id,{mid:id,url,name:`Siren map ${id.slice(0,8)}`});
+  }
+  return{maps:[...found.values()],shorts:[...new Set(allUrls(text).filter(isShortUrl))]};
+}
+
+function directText(element,tag){
+  const node=element.getElementsByTagName(tag)[0];
+  return node?.textContent?.trim()||'';
+}
+function extendedFields(placemark){
+  const out={};
+  for(const data of placemark.getElementsByTagName('Data')){
+    const key=data.getAttribute('name')||'';
+    const value=data.getElementsByTagName('value')[0]?.textContent?.trim()||'';
+    if(key&&value)out[key]=stripHtml(value);
+  }
+  for(const data of placemark.getElementsByTagName('SimpleData')){
+    const key=data.getAttribute('name')||'';
+    const value=data.textContent?.trim()||'';
+    if(key&&value)out[key]=stripHtml(value);
+  }
+  return out;
+}
+function field(fields,names){
+  for(const wanted of names){
+    const key=Object.keys(fields).find(k=>k.toLowerCase()===wanted.toLowerCase());
+    if(key&&fields[key])return fields[key];
+  }
+  return'';
+}
+function folderName(placemark){
+  let node=placemark.parentElement;
+  while(node){
+    if(node.localName==='Folder'||node.tagName==='Folder'){
+      for(const child of node.children)if(child.localName==='name'||child.tagName==='name')return child.textContent.trim();
+    }
+    node=node.parentElement;
+  }
+  return'';
+}
+function parseKml(text,source){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length)throw Error('invalid KML');
+  const rows=[];
+  for(const p of doc.getElementsByTagName('Placemark')){
+    const point=p.getElementsByTagName('Point')[0];
+    const coord=point?.getElementsByTagName('coordinates')[0]?.textContent?.trim();
+    if(!coord)continue;
+    const [lng,lat]=coord.split(',').map(Number);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))continue;
+    const fields=extendedFields(p);
+    const name=directText(p,'name')||'Unidentified siren';
+    const description=stripHtml(directText(p,'description'));
+    const combined=[name,description,...Object.values(fields)].join(' ');
+    const status=/\b(inactive|removed|demolished|former|decommissioned|destroyed)\b/i.test(combined)?'inactive':/\b(active|operational|working|in service)\b/i.test(combined)?'active':'unknown';
+    const schedule=(combined.match(/(?:weekly|monthly|quarterly|annual(?:ly)?|every\s+\w+|first\s+\w+|last\s+\w+)[^.;]{0,150}(?:test|noon|am|pm)?/i)||[])[0]
+      ||(combined.match(/(?:test(?:ed|ing)?|schedule)[^.;]{0,150}/i)||[])[0]||'';
+    rows.push({
+      id:`${source.mid}-${lat.toFixed(6)}-${lng.toFixed(6)}-${name}`.slice(0,240),
+      name,lat,lng,status,
+      manufacturer:field(fields,['Manufacturer','Make','Brand']),
+      model:field(fields,['Model','Siren Model'])||name,
+      city:field(fields,['City','Town','Municipality']),
+      state:field(fields,['State','Province','Region'])||source.name,
+      category:folderName(p)||field(fields,['Type','Category'])||'Outdoor warning siren',
+      mount:field(fields,['Mount','Mounting','Installation']),
+      testSchedule:stripHtml(schedule),description,
+      sourceMap:source.name,sourceUrl:source.url,sourceMid:source.mid
+    });
+  }
+  return rows;
+}
+
+function openDb(){
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open('identi-siren',1);
+    request.onupgradeneeded=()=>request.result.createObjectStore('cache');
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error);
+  });
+}
+async function cacheGet(){
+  try{
+    const db=await openDb();
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction('cache','readonly');
+      const request=tx.objectStore('cache').get('master');
+      request.onsuccess=()=>resolve(request.result||null);
+      request.onerror=()=>reject(request.error);
+    });
+  }catch{return null}
+}
+async function cachePut(value){
+  try{
+    const db=await openDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('cache','readwrite');
+      tx.objectStore('cache').put(value,'master');
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+  }catch{}
+}
+async function cacheClear(){
+  try{
+    const db=await openDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('cache','readwrite');
+      tx.objectStore('cache').delete('master');
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+  }catch{}
+}
+
+async function pool(items,limit,worker){
+  let next=0;
+  const runners=Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(true){
+      const index=next++;
+      if(index>=items.length)return;
+      await worker(items[index],index);
+    }
+  });
+  await Promise.all(runners);
+}
+
+async function importMaster(force=false){
+  if(activeImport)return;
+  activeImport=true;
+  try{
+    if(!force&&!sirens.length){
+      const cached=await cacheGet();
+      if(cached?.sirens?.length&&Date.now()-cached.at<7*86400000){
+        manifest=cached.manifest||[];
+        addPins(cached.sirens);
+        setStatus(`${sirens.length.toLocaleString()} cached pins loaded from ${manifest.filter(x=>x.status==='ok').length} maps.`,'ok');
+        if(loadEl)loadEl.textContent=`${sirens.length.toLocaleString()} cached pins loaded.`;
+        bar.style.width='100%';
+        return;
+      }
+    }
+
+    if(force){
+      for(const item of markerLayers)item.layer.remove();
+      markerLayers=[];markerKeys.clear();sirens=[];manifest=[];
+      await cacheClear();
+    }
+
+    setStatus('Reading all pages of the master siren-map thread…');
+    const mapsById=new Map();
+    const shortLinks=new Set();
+    let emptyPages=0;
+
+    for(let start=0;start<=300&&emptyPages<7;start+=10){
+      const pageUrl=start?`${FORUM}&start=${start}`:FORUM;
+      try{
+        const {text}=await fetchFirst(forumSources(pageUrl),t=>/siren|google|maps/i.test(t),45000);
+        const extracted=extractMapLinks(text);
+        const before=mapsById.size;
+        for(const item of extracted.maps)mapsById.set(item.mid,{...mapsById.get(item.mid),...item});
+        for(const item of extracted.shorts)shortLinks.add(item);
+        emptyPages=mapsById.size===before?emptyPages+1:0;
+        setStatus(`Reading thread pages… ${mapsById.size} Google maps found`);
+      }catch(error){
+        emptyPages++;
+      }
+    }
+
+    if(shortLinks.size){
+      setStatus(`Resolving ${shortLinks.size} shortened map links…`);
+      await pool([...shortLinks],3,async url=>{
+        const resolved=await resolveShort(url);
+        const mid=mapId(resolved);
+        if(mid)mapsById.set(mid,{mid,url:resolved,name:`Siren map ${mid.slice(0,8)}`});
+      });
+    }
+
+    const maps=[...mapsById.values()];
+    if(!maps.length)throw Error('The forum proxies did not return any complete Google My Maps links.');
+
+    let completed=0;
+    let successful=0;
+    updateImportStatus(0,maps.length,0,maps.length,'downloading KML');
+
+    await pool(maps,2,async source=>{
+      const kml=`https://www.google.com/maps/d/kml?forcekml=1&mid=${encodeURIComponent(source.mid)}`;
+      try{
+        const {text}=await fetchFirst(kmlSources(kml),t=>/<kml[\s>]/i.test(t),60000);
+        const rows=parseKml(text,source);
+        addPins(rows);
+        manifest.push({...source,kml,status:'ok',pins:rows.length});
+        successful++;
+      }catch(error){
+        manifest.push({...source,kml,status:'failed',pins:0,error:error.message});
+      }finally{
+        completed++;
+        updateImportStatus(completed,maps.length,completed,maps.length,`${successful} loaded`);
+      }
+      await sleep(120);
+    });
+
+    if(!sirens.length)throw Error('Map links were found, but no KML pin data could be downloaded through the available browser proxies.');
+    await cachePut({at:Date.now(),sirens,manifest});
+    bar.style.width='100%';
+    setStatus(`${sirens.length.toLocaleString()} pins loaded from ${successful} of ${maps.length} maps.`,'ok');
+    if(loadEl)loadEl.textContent=`${sirens.length.toLocaleString()} pins loaded from ${successful} maps.`;
+  }catch(error){
+    setStatus(`Import failed: ${error.message}`,'error');
+    if(loadEl)loadEl.textContent=`Import failed: ${error.message}`;
+  }finally{
+    activeImport=false;
+  }
+}
+
+search.addEventListener('input',()=>{
+  const text=search.value.toLowerCase().trim();
+  const list=!text?sirens:sirens.filter(s=>JSON.stringify(s).toLowerCase().includes(text));
+  renderFiltered(list);
+  setStatus(`${list.length.toLocaleString()} visible of ${sirens.length.toLocaleString()} pins`);
+});
+document.querySelector('#locate').onclick=()=>map.locate({setView:true,maxZoom:12});
+document.querySelector('#refresh').onclick=()=>importMaster(true);
+document.querySelector('#key').onclick=()=>{
+  const old=localStorage.getItem('is-youtube-key')||'';
+  const value=prompt('Optional YouTube Data API key. It is stored only in this browser. Leave blank to remove it.',old);
+  if(value===null)return;
+  value.trim()?localStorage.setItem('is-youtube-key',value.trim()):localStorage.removeItem('is-youtube-key');
+};
+
+if(sirens.length){
+  const generated=[...sirens];
+  sirens=[];addPins(generated);
+  const good=manifest.filter(x=>x.status==='ok').length;
+  setStatus(`${sirens.length.toLocaleString()} pins loaded from ${good} generated maps.`,'ok');
+  if(loadEl)loadEl.textContent=`${sirens.length.toLocaleString()} pins loaded.`;
+  bar.style.width='100%';
+}else{
+  importMaster(false);
+}
+</script>
+</body>
+</html>
